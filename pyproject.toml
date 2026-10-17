@@ -1,0 +1,22 @@
+[project]
+name = "personalised-doc-search"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "streamlit>=1.40",
+    "plotly>=5.20",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "SPARQLWrapper>=2.0",
+    "requests>=2.31",
+    "sentence-transformers>=3.0",
+    "torch>=2.4",
+    "faiss-cpu>=1.8",
+    "scikit-learn>=1.5",
+    "transformers>=4.44",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "ollama>=0.3",
+]

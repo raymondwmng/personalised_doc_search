@@ -19,4 +19,6 @@ dependencies = [
     "numpy>=1.26",
     "pandas>=2.2",
     "ollama>=0.3",
+    "tqdm>=4.70.1",
+    "torchvision>=0.29.1",
 ]

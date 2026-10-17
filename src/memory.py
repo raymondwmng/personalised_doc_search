@@ -14,6 +14,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_MEMORY = {
+    "user_context": "Focus on high-impact AI safety regulations, GDPR data subject rights, and cross-border tech compliance.",
+    "preferred_topics": ["Data Protection and Privacy", "Digital Services"],
+    "preferred_sectors": ["Technology and Digital", "Finance and Banking"],
+    "notes": "Interested in direct accountability for deployers and liability caps.",
+}
+
+
 class UserMemoryStore:
     """Manages persistent user memory (JSON) and search history (SQLite)."""
 
@@ -54,24 +62,25 @@ class UserMemoryStore:
 
     def _init_memory_json(self) -> None:
         if not self.json_path.exists():
-            default_state = {
-                "user_context": "Focus on high-impact AI safety regulations, GDPR data subject rights, and cross-border tech compliance.",
-                "preferred_topics": ["Data Protection and Privacy", "Digital Services"],
-                "preferred_sectors": ["Technology and Digital", "Finance and Banking"],
-                "notes": "Interested in direct accountability for deployers and liability caps.",
-                "updated_at": datetime.now().isoformat(),
-            }
-            self.save_memory(default_state)
+            self.reset_to_defaults()
 
     def load_memory(self) -> Dict[str, Any]:
         """Loads user memory dictionary from JSON."""
         try:
             if self.json_path.exists():
                 with open(self.json_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
         except Exception as e:
             logger.error(f"Error reading {self.json_path}: {e}")
-        return {"user_context": "", "notes": "", "preferred_topics": []}
+        return {
+            "user_context": "",
+            "preferred_topics": [],
+            "preferred_sectors": [],
+            "notes": "",
+            "updated_at": datetime.now().isoformat(),
+        }
 
     def save_memory(self, memory_dict: Dict[str, Any]) -> None:
         """Saves user memory dictionary to JSON."""
@@ -85,11 +94,23 @@ class UserMemoryStore:
         context_parts = []
         if mem.get("user_context"):
             context_parts.append(f"User Profile & Interests: {mem['user_context']}")
+        if mem.get("preferred_topics"):
+            topics = mem["preferred_topics"]
+            topics_str = ", ".join(topics) if isinstance(topics, list) else str(topics)
+            context_parts.append(f"Priority Regulatory Topics: {topics_str}")
+        if mem.get("preferred_sectors"):
+            sectors = mem["preferred_sectors"]
+            sectors_str = ", ".join(sectors) if isinstance(sectors, list) else str(sectors)
+            context_parts.append(f"Priority Industry Sectors: {sectors_str}")
         if mem.get("notes"):
             context_parts.append(f"Specific Directives: {mem['notes']}")
-        if mem.get("preferred_topics"):
-            context_parts.append(f"Priority Topics: {', '.join(mem['preferred_topics'])}")
         return "\n".join(context_parts)
+
+    def reset_to_defaults(self) -> Dict[str, Any]:
+        """Resets memory to default template state."""
+        state = dict(DEFAULT_MEMORY)
+        self.save_memory(state)
+        return state
 
     def clear_memory(self) -> None:
         """Resets memory to clean state."""

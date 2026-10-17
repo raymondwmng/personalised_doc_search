@@ -9,15 +9,34 @@ def render_summary(summary_data: Dict[str, Any]) -> None:
     summary_text = summary_data.get("summary", "")
     model_used = summary_data.get("model_used", "Local Ollama")
     status = summary_data.get("status", "success")
+    docs_analyzed = summary_data.get("docs_analyzed", 0)
+    memory_applied = summary_data.get("memory_applied", False)
+
+    docs_badge = (
+        f'<span class="badge badge-score" style="margin-left: auto;">Synthesised: {docs_analyzed} Acts</span>'
+        if docs_analyzed
+        else ""
+    )
+    mem_badge = (
+        '<span class="badge" style="background: rgba(139,92,246,0.25); color: #c4b5fd; border: 1px solid rgba(139,92,246,0.5);">🧠 Personalised</span>'
+        if memory_applied
+        else ""
+    )
 
     st.markdown(
         f"""
         <div class="summary-container">
             <div class="summary-title">
                 <span>📑 Executive Legal Analysis</span>
-                <span class="badge badge-celex" style="margin-left: auto;">Model: {model_used}</span>
+                <div style="margin-left: auto; display: flex; gap: 0.5rem; align-items: center;">
+                    {mem_badge}
+                    {docs_badge}
+                    <span class="badge badge-celex">Model: {model_used}</span>
+                </div>
             </div>
-            <div>{summary_text}</div>
+
+{summary_text}
+
         </div>
         """,
         unsafe_allow_html=True,

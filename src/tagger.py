@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from tqdm import tqdm
 
 import config
 
@@ -25,8 +26,10 @@ class TaxonomyTagger:
         self._build_category_prototypes()
 
     def get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
+        conn = sqlite3.connect(str(self.db_path), timeout=30.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 30000")
         return conn
 
     def init_db(self) -> None:
@@ -71,13 +74,22 @@ class TaxonomyTagger:
         )
         self.vectorizer.fit(all_prototype_texts)
 
-        # Cache prototype vectors
+        # Cache prototype vectors and stacked prototype matrices for high-throughput dot-product matching
         self.prototype_vectors: Dict[str, Dict[str, np.ndarray]] = {}
+        self.prototype_matrices: Dict[str, Any] = {}
+
         for dimension, cat_dict in self.category_prototypes.items():
             self.prototype_vectors[dimension] = {}
-            for cat, text in cat_dict.items():
+            cats = self.taxonomy[dimension]
+            cat_texts = []
+            for cat in cats:
+                text = cat_dict[cat]
                 vec = self.vectorizer.transform([text])
                 self.prototype_vectors[dimension][cat] = vec
+                cat_texts.append(text)
+
+            # Stacked prototype matrix of shape (num_categories, vocab_size)
+            self.prototype_matrices[dimension] = self.vectorizer.transform(cat_texts)
 
     def map_eurovoc_raw(self, eurovoc_raw: str) -> List[Tuple[str, str, float]]:
         """Extracts taxonomy tags if raw EuroVoc concept labels or URIs match keywords."""
@@ -108,10 +120,8 @@ class TaxonomyTagger:
         """
         results = []
         eurovoc_matches = self.map_eurovoc_raw(eurovoc_raw)
-        eurovoc_found_dims = set()
         for dim, cat, conf in eurovoc_matches:
             results.append((dim, cat, conf, "eurovoc"))
-            eurovoc_found_dims.add(dim)
 
         if not text.strip():
             return results
@@ -120,17 +130,12 @@ class TaxonomyTagger:
         doc_vec = self.vectorizer.transform([text])
 
         for dimension, categories in self.taxonomy.items():
-            # If EuroVoc gave tags for this dimension, we still check TF-IDF for secondary tags
-            scores = []
-            for cat in categories:
-                proto_vec = self.prototype_vectors[dimension][cat]
-                sim = float(cosine_similarity(doc_vec, proto_vec)[0][0])
-                scores.append((cat, sim))
-
+            # Fast cosine similarity via sparse matrix dot product
+            sims = doc_vec.dot(self.prototype_matrices[dimension].T).toarray()[0]
+            scores = [(categories[idx], float(sims[idx])) for idx in range(len(categories))]
             scores.sort(key=lambda x: x[1], reverse=True)
 
             if dimension == "Jurisdiction":
-                # Assign top 1 jurisdiction
                 top_cat, top_score = scores[0]
                 conf = max(0.40, min(0.99, top_score * 2.0))
                 if not any(r[0] == "Jurisdiction" for r in results):
@@ -162,35 +167,121 @@ class TaxonomyTagger:
 
         return results
 
-    def tag_all_documents(self) -> int:
-        """Processes all documents in documents.db and writes tags to document_tags."""
+    def tag_all_documents(self, batch_size: int = 500) -> int:
+        """Processes all documents in documents.db in streaming batches, using vectorized
+
+        matrix operations and committing incrementally to SQLite.
+        """
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, celex, title, full_text, eurovoc_raw FROM documents")
-            docs = cursor.fetchall()
+            cursor.execute("SELECT COUNT(*) AS cnt FROM documents")
+            total_docs = cursor.fetchone()["cnt"]
 
-        total_tagged = 0
-        tag_records = []
+            if total_docs == 0:
+                logger.info("No documents found in documents.db to tag.")
+                return 0
 
-        for doc in docs:
-            doc_id = doc["id"]
-            text = f"{doc['title']}\n\n{doc['full_text']}"
-            eurovoc_raw = doc["eurovoc_raw"] or ""
-
-            tags = self.tag_text(text, eurovoc_raw)
-            for dim, cat, conf, method in tags:
-                tag_records.append((doc_id, dim, cat, conf, method))
-
-            total_tagged += 1
-
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
+            # Clear existing tags
             cursor.execute("DELETE FROM document_tags")
-            cursor.executemany("""
-            INSERT INTO document_tags (doc_id, dimension, category, confidence_score, method)
-            VALUES (?, ?, ?, ?, ?)
-            """, tag_records)
             conn.commit()
 
-        logger.info(f"Tagged {total_tagged} documents with {len(tag_records)} total tag assignments.")
+        logger.info(f"Tagging {total_docs} documents in batches of {batch_size}...")
+
+        total_tagged = 0
+        total_tags_saved = 0
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            last_id = 0
+
+            with tqdm(total=total_docs, desc="🏷️  Tagging documents", unit="doc") as pbar:
+                while True:
+                    cursor.execute("""
+                        SELECT id, title, full_text, eurovoc_raw
+                        FROM documents
+                        WHERE id > ?
+                        ORDER BY id ASC
+                        LIMIT ?
+                    """, (last_id, batch_size))
+                    batch = cursor.fetchall()
+                    if not batch:
+                        break
+
+                    last_id = batch[-1]["id"]
+
+                    # Vectorize batch texts at once for high throughput
+                    batch_texts = [
+                        f"{doc['title'] or ''}\n\n{doc['full_text'] or ''}".strip()
+                        for doc in batch
+                    ]
+                    doc_mat = self.vectorizer.transform(batch_texts)
+
+                    # Compute similarity matrices for each dimension
+                    sim_matrices = {}
+                    for dim in self.taxonomy:
+                        # (batch_size, num_categories_in_dimension)
+                        sim_matrices[dim] = doc_mat.dot(self.prototype_matrices[dim].T).toarray()
+
+                    batch_tag_records = []
+
+                    for idx, doc in enumerate(batch):
+                        doc_id = doc["id"]
+                        eurovoc_raw = doc["eurovoc_raw"] or ""
+                        doc_tags = []
+
+                        # 1. EuroVoc direct mapping
+                        eurovoc_matches = self.map_eurovoc_raw(eurovoc_raw)
+                        for dim, cat, conf in eurovoc_matches:
+                            doc_tags.append((doc_id, dim, cat, conf, "eurovoc"))
+
+                        # 2. Vectorized TF-IDF prototype matching
+                        for dim, categories in self.taxonomy.items():
+                            sims = sim_matrices[dim][idx]
+                            scores = [(categories[c_idx], float(sims[c_idx])) for c_idx in range(len(categories))]
+                            scores.sort(key=lambda x: x[1], reverse=True)
+
+                            if dim == "Jurisdiction":
+                                top_cat, top_score = scores[0]
+                                conf = max(0.40, min(0.99, top_score * 2.0))
+                                if not any(r[1] == "Jurisdiction" for r in doc_tags):
+                                    doc_tags.append((doc_id, dim, top_cat, round(conf, 3), "tfidf"))
+
+                            elif dim == "Regulatory Topics":
+                                assigned = 0
+                                for cat, sim in scores:
+                                    if sim > 0.05 or assigned == 0:
+                                        conf = max(0.35, min(0.98, sim * 2.5))
+                                        if not any(r[1] == dim and r[2] == cat for r in doc_tags):
+                                            doc_tags.append((doc_id, dim, cat, round(conf, 3), "tfidf"))
+                                            assigned += 1
+                                    if assigned >= 3:
+                                        break
+
+                            elif dim == "Industry / Sector":
+                                assigned = 0
+                                for cat, sim in scores:
+                                    if sim > 0.04 or assigned == 0:
+                                        conf = max(0.30, min(0.95, sim * 2.5))
+                                        if not any(r[1] == dim and r[2] == cat for r in doc_tags):
+                                            doc_tags.append((doc_id, dim, cat, round(conf, 3), "tfidf"))
+                                            assigned += 1
+                                    if assigned >= 2:
+                                        break
+
+                        batch_tag_records.extend(doc_tags)
+
+                    # Persist batch to SQLite
+                    cursor.executemany("""
+                    INSERT INTO document_tags (doc_id, dimension, category, confidence_score, method)
+                    VALUES (?, ?, ?, ?, ?)
+                    """, batch_tag_records)
+                    conn.commit()
+
+                    total_tagged += len(batch)
+                    total_tags_saved += len(batch_tag_records)
+
+                    pbar.update(len(batch))
+                    pbar.set_postfix({"tags_saved": total_tags_saved, "batch_size": len(batch)})
+
+        logger.info(f"Tagged {total_tagged} documents with {total_tags_saved} total tag assignments.")
         return total_tagged

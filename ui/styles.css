@@ -1,5 +1,7 @@
 /* Personalised EURLEX Search Design System */
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
 
 :root {
   --font-main: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -19,8 +21,29 @@
   --text-muted: #94a3b8;
 }
 
-html, body, [class*="st-"] {
+html, body, .stApp {
   font-family: var(--font-main);
+}
+
+/* Preserve Streamlit Material Icons & Symbols from being overridden */
+.material-symbols-rounded,
+.material-symbols-outlined,
+[class*="material-symbols"],
+[data-testid*="Icon"],
+[data-testid="stExpanderToggleIcon"],
+[data-testid="stSidebarCollapseButton"] span,
+[data-testid="stSidebarCollapseButton"] button span,
+button[kind="header"] span {
+  font-family: 'Material Symbols Rounded', 'Material Symbols Outlined' !important;
+  font-feature-settings: 'liga' 1;
+  -webkit-font-feature-settings: 'liga';
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  word-wrap: normal;
+  white-space: nowrap;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Glassmorphism Card Containers */

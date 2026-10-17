@@ -57,9 +57,14 @@ def main():
 
         summariser = LegalSummariser()
         mem_ctx = mem.get_prompt_context_string() if args.memory else None
-        print(f"\nGenerating summary using {args.model}...")
-        summary_res = summariser.summarise(args.search, results, model_name=args.model, memory_context=mem_ctx)
-        print("\n--- Summary ---")
+        summary_res = summariser.summarise(
+            args.search,
+            results,
+            model_name=args.model,
+            memory_context=mem_ctx,
+            max_docs=len(results),
+        )
+        print(f"\n--- Executive Summary (Synthesised across {summary_res.get('docs_analyzed', len(results))} Acts) ---")
         print(summary_res.get("summary"))
         return
 

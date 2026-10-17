@@ -3,6 +3,13 @@
 import logging
 from pathlib import Path
 import sqlite3
+import sys
+
+# Ensure repository root is in sys.path regardless of launch cwd
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import streamlit as st
 
 import config
@@ -86,6 +93,33 @@ def main():
     # Search Bar
     query, enable_memory, selected_model, top_k, submitted = render_search_bar()
 
+    # Active Memory Status Strip
+    if enable_memory:
+        mem_profile = memory_store.load_memory()
+        topics = mem_profile.get("preferred_topics", [])
+        sectors = mem_profile.get("preferred_sectors", [])
+        context = mem_profile.get("user_context", "")
+        notes = mem_profile.get("notes", "")
+
+        active_badges = []
+        if context:
+            active_badges.append(f'<span class="badge" style="background: rgba(99,102,241,0.2); color: #c7d2fe;">👤 Background: {len(context)} chars</span>')
+        for t in topics:
+            active_badges.append(f'<span class="badge badge-topic">⚖️ {t}</span>')
+        for s in sectors:
+            active_badges.append(f'<span class="badge badge-sector">🏢 {s}</span>')
+        if notes:
+            active_badges.append(f'<span class="badge" style="background: rgba(16,185,129,0.2); color: #a7f3d0;">🎯 Directives: {len(notes)} chars</span>')
+
+        with st.expander(f"🧠 Active Personalised Memory Prompt ({len(topics)} Topics · {len(sectors)} Sectors · Background {'✓' if context else '✗'} · Directives {'✓' if notes else '✗'})", expanded=False):
+            if active_badges:
+                st.markdown(f"<div style='margin-bottom: 0.5rem;'>{''.join(active_badges)}</div>", unsafe_allow_html=True)
+            prompt_str = memory_store.get_prompt_context_string()
+            if prompt_str:
+                st.code(prompt_str, language="text")
+            else:
+                st.info("Memory is enabled but all 4 fields are currently blank. Customise them in the sidebar.")
+
     # Execute Search
     if submitted and query.strip():
         with st.spinner("🔍 Performing semantic retrieval & hybrid re-ranking..."):
@@ -113,6 +147,7 @@ def main():
                     memory_context=memory_ctx,
                     max_docs=top_k,
                 )
+                summary_data["memory_applied"] = bool(memory_ctx)
                 st.session_state["summary_data"] = summary_data
 
                 # Log to persistent history

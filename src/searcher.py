@@ -48,8 +48,9 @@ class SearchEngine:
             mem = self.memory_store.load_memory()
             user_context = mem.get("user_context", "")
             topics = " ".join(mem.get("preferred_topics", []))
-            if user_context or topics:
-                memory_context = f"{user_context} {topics}".strip()
+            sectors = " ".join(mem.get("preferred_sectors", []))
+            if user_context or topics or sectors:
+                memory_context = f"{user_context} {topics} {sectors}".strip()
                 # Lightly bias semantic query with profile context
                 semantic_query = f"{cleaned_query} ({memory_context[:100]})"
 

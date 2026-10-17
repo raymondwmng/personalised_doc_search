@@ -1,4 +1,8 @@
-"""Stage 1: Script to download EUR-Lex documents and metadata via SPARQL/Cellar."""
+"""Stage 1: Script to load EUR-Lex documents and metadata from the comprehensive Kaggle dataset.
+
+Replaces the legacy SPARQL/Cellar scraping mechanism, eliminating noise (like *R*.html corrigenda)
+and providing rich, clean full texts with official EUROVOC annotations.
+"""
 
 import argparse
 import logging
@@ -9,53 +13,123 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
-from src.downloader import EurlexDownloader
+from src.downloader import EurlexDatasetLoader
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("01_download_eurlex")
 
 
+def clean_noisy_corrigenda_files(raw_dir: Path) -> int:
+    """Removes legacy corrigenda files (*R*.html) left behind by previous SPARQL scrapes."""
+    removed = 0
+    if not raw_dir.exists():
+        return removed
+
+    for p in list(raw_dir.glob("*R*.html")):
+        try:
+            p.unlink()
+            removed += 1
+        except Exception as e:
+            logger.warning(f"Failed to remove {p}: {e}")
+    if removed > 0:
+        logger.info(f"Cleaned up {removed} noisy corrigenda files from {raw_dir}")
+    return removed
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Download EUR-Lex documents and metadata.")
-    parser.add_argument("--limit", type=int, default=50, help="Maximum number of documents to download (default: 50 for quick MVP test, can increase up to 5000)")
-    parser.add_argument("--offset", type=int, default=0, help="SPARQL query offset")
-    parser.add_argument("--include-local", action="store_true", default=True, help="Ingest local test documents in data/ if available")
-    parser.add_argument("--skip-sparql", action="store_true", help="Skip SPARQL and only process local documents")
+    parser = argparse.ArgumentParser(
+        description="Load EUR-Lex documents and metadata from the Kaggle dataset."
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=config.DEFAULT_LOAD_LIMIT,
+        help=f"Number of documents to load (default: {config.DEFAULT_LOAD_LIMIT}; set to 0 or negative for all)",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Load all available documents from the dataset (>90,000 with EuroVoc, 142,000 total)",
+    )
+    parser.add_argument(
+        "--source-csv",
+        type=str,
+        default=str(config.EURLEX_KAGGLE_CSV),
+        help=f"Path to Kaggle EurLex CSV file (default: {config.EURLEX_KAGGLE_CSV})",
+    )
+    parser.add_argument(
+        "--allow-missing-eurovoc",
+        action="store_true",
+        help="Allow documents that do not have EUROVOC annotations (default is EuroVoc-only)",
+    )
+    parser.add_argument(
+        "--act-type",
+        type=str,
+        default=None,
+        help="Filter by act type: Regulation, Directive, Decision, etc. (default: all)",
+    )
+    parser.add_argument(
+        "--save-raw",
+        action="store_true",
+        default=True,
+        help="Save document full text files to data/raw/{celex}.txt (default: True)",
+    )
+    parser.add_argument(
+        "--ingest-to-db",
+        action="store_true",
+        default=True,
+        help="Directly chunk and store into documents.db during load (default: True)",
+    )
+    parser.add_argument(
+        "--include-local",
+        action="store_true",
+        default=True,
+        help="Ingest local benchmark test JSONL files if present",
+    )
+    parser.add_argument(
+        "--clean-corrigenda",
+        action="store_true",
+        default=True,
+        help="Clean up any old noisy *R*.html corrigenda files in data/raw/",
+    )
     args = parser.parse_args()
 
-    downloader = EurlexDownloader()
+    # Step 1: Clean up old noisy corrigenda files if requested
+    if args.clean_corrigenda:
+        clean_noisy_corrigenda_files(config.RAW_DIR)
 
-    # Step 1: Ingest local benchmark files if present
+    loader = EurlexDatasetLoader(kaggle_csv=Path(args.source_csv))
+
+    # Step 2: Ingest local benchmark files if present
     if args.include_local:
         for jsonl_filename in ["test3-legal-documents.jsonl", "long-test3-legal-documents.jsonl"]:
             local_path = config.DATA_DIR / jsonl_filename
             if local_path.exists():
-                logger.info(f"Ingesting local document file: {local_path}")
-                downloader.ingest_local_jsonl(local_path)
+                loader.ingest_local_jsonl(local_path)
 
-    if args.skip_sparql:
-        logger.info("Skipping SPARQL download as requested.")
-        return
+    # Step 3: Determine limit
+    limit = None if args.all or args.limit <= 0 else args.limit
+    eurovoc_only = not args.allow_missing_eurovoc
 
-    # Step 2: Query SPARQL endpoint
-    logger.info(f"Starting SPARQL metadata retrieval for limit={args.limit}, offset={args.offset}...")
-    docs = downloader.query_metadata(limit=args.limit, offset=args.offset)
-    existing_meta = downloader.load_existing_metadata()
+    logger.info(
+        f"Starting dataset load from {args.source_csv} (limit={limit}, eurovoc_only={eurovoc_only}, act_type={args.act_type})..."
+    )
 
-    success_count = 0
-    for idx, doc in enumerate(docs, 1):
-        celex = doc["celex"]
-        logger.info(f"[{idx}/{len(docs)}] Processing CELEX: {celex} - {doc['title'][:60]}...")
-        
-        # Download HTML
-        html_content = downloader.download_document_html(celex, doc.get("html_url"))
-        if html_content:
-            success_count += 1
-            if celex not in existing_meta:
-                downloader.save_metadata_record(doc)
-                existing_meta[celex] = doc
+    docs = loader.load_and_process(
+        limit=limit,
+        eurovoc_only=eurovoc_only,
+        act_type=args.act_type,
+        save_metadata=True,
+        save_raw_txt=args.save_raw,
+        ingest_to_db=args.ingest_to_db,
+    )
 
-    logger.info(f"Download complete: {success_count}/{len(docs)} documents successfully saved to {config.RAW_DIR}")
+    logger.info(
+        f"Done! Successfully loaded {len(docs)} documents. "
+        f"Metadata written to {config.PROCESSED_DIR / 'metadata.jsonl'}."
+    )
+    if args.ingest_to_db:
+        logger.info(f"Database {config.DOCUMENTS_DB_PATH} updated with clean documents and chunks.")
 
 
 if __name__ == "__main__":

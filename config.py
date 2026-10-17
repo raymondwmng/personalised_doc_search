@@ -20,11 +20,10 @@ PROMPT_CONTEXT_PATH = MEMORY_DIR / "prompt_context.json"
 for path in [RAW_DIR, PROCESSED_DIR, INDEX_DIR, EMBEDDINGS_DIR, TAXONOMY_DIR, DB_DIR, MEMORY_DIR]:
     path.mkdir(parents=True, exist_ok=True)
 
-# SPARQL and EURLEX Cellar Endpoints
-SPARQL_ENDPOINT = "http://publications.europa.eu/webapi/rdf/sparql"
-CELLAR_REST_BASE = "http://publications.europa.eu/resource/cellar"
-REQUEST_DELAY_SECONDS = 1.0  # Polite rate limiting
-DEFAULT_SPARQL_LIMIT = 5000
+# EUR-Lex Dataset Paths (Kaggle: puskas78/eurlex-dataset)
+EURLEX_KAGGLE_DIR = DATA_DIR / "eurlex_kaggle"
+EURLEX_KAGGLE_CSV = EURLEX_KAGGLE_DIR / "EurLex_all.csv"
+DEFAULT_LOAD_LIMIT = 1000
 
 # Chunking Configuration
 CHUNK_SIZE_TOKENS = 400

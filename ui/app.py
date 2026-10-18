@@ -139,7 +139,9 @@ def main():
 
         if results:
             memory_ctx = memory_store.get_prompt_context_string() if enable_memory else None
-            with st.spinner(f"🧠 Synthesising legal summary with local model '{selected_model}'..."):
+            model_type_str = "Mistral Cloud API" if config.is_mistral_model(selected_model) else "local Ollama"
+            model_display_name = config.ALL_MODELS.get(selected_model, selected_model)
+            with st.spinner(f"🧠 Synthesising legal summary with {model_type_str} '{model_display_name}'..."):
                 summary_data = summariser.summarise(
                     query=query.strip(),
                     retrieved_docs=results,

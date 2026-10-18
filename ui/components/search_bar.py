@@ -37,14 +37,15 @@ def render_search_bar() -> Tuple[str, bool, str, int, bool]:
         )
 
     with c2:
-        model_keys = list(config.OLLAMA_MODELS.keys())
+        model_keys = list(config.ALL_MODELS.keys())
+        default_idx = model_keys.index(config.DEFAULT_ANALYTICAL_MODEL) if config.DEFAULT_ANALYTICAL_MODEL in model_keys else 0
         selected_model = st.selectbox(
             "LLM Summariser",
             options=model_keys,
-            format_func=lambda k: config.OLLAMA_MODELS[k],
-            index=0,
-            help="Select local Ollama model for legal synthesis (runs on RTX A2000)",
-            key="selected_ollama_model",
+            format_func=lambda k: config.ALL_MODELS[k],
+            index=default_idx,
+            help="Select Mistral API (cloud) or local Ollama model for legal synthesis",
+            key="selected_llm_model",
         )
 
     with c3:

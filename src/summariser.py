@@ -1,9 +1,11 @@
-"""Ollama-based legal summarisation module."""
+"""Legal summarisation module supporting Mistral API and local Ollama models."""
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 import ollama
+import requests
 
 import config
 
@@ -12,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class LegalSummariser:
-    """Generates precise legal syntheses and citations across multiple documents using local Ollama models."""
+    """Generates precise legal syntheses and citations across multiple documents using Mistral API and local Ollama models."""
 
     def __init__(
         self,
@@ -20,12 +22,15 @@ class LegalSummariser:
         fallback_model: str = config.DEFAULT_FALLBACK_MODEL,
         num_ctx: int = config.DEFAULT_NUM_CTX,
         timeout: float = config.DEFAULT_OLLAMA_TIMEOUT,
+        mistral_timeout: float = config.DEFAULT_MISTRAL_TIMEOUT,
     ):
         self.default_model = default_model
         self.fallback_model = fallback_model
         self.num_ctx = num_ctx
         self.timeout = timeout
+        self.mistral_timeout = mistral_timeout
         self.client = ollama.Client()
+
 
     def build_catalog_and_excerpts(
         self, retrieved_docs: List[Dict[str, Any]], max_docs: int = 5
@@ -129,6 +134,23 @@ class LegalSummariser:
 
         user_prompt = "\n".join(user_content_parts)
 
+        # Route to Mistral Cloud API if model is mistral-large-4, mistral-small-2603, or alias
+        if config.is_mistral_model(selected_model):
+            mistral_res = self._summarise_with_mistral(
+                model_name=selected_model,
+                system_instruction=system_instruction,
+                user_prompt=user_prompt,
+                total_docs=total_docs,
+            )
+            if mistral_res.get("status") == "success":
+                return mistral_res
+            logger.warning(
+                f"Mistral model '{selected_model}' generation failed: {mistral_res.get('summary')}. "
+                f"Attempting local fallback to '{self.fallback_model}'..."
+            )
+            if config.is_mistral_model(self.fallback_model):
+                return mistral_res
+
         options = {
             "num_ctx": self.num_ctx,
             "temperature": 0.2,  # Low temperature for precise legal fidelity
@@ -169,3 +191,100 @@ class LegalSummariser:
             "status": "error",
             "docs_analyzed": 0,
         }
+
+    def _summarise_with_mistral(
+        self,
+        model_name: str,
+        system_instruction: str,
+        user_prompt: str,
+        total_docs: int,
+    ) -> Dict[str, Any]:
+        """Calls Mistral AI API for legal synthesis using Mistral client or HTTP REST fallback.
+        
+        Uses the MISTRAL_API_KEY stored in .env without exposing the key in code.
+        """
+        api_key = config.MISTRAL_API_KEY or os.getenv("MISTRAL_API_KEY", "")
+        if not api_key:
+            return {
+                "summary": (
+                    "⚠️ **Mistral API Key Missing**\n\n"
+                    "The selected model requires `MISTRAL_API_KEY` to be set in your `.env` file.\n"
+                    "Please check your `.env` file and restart or re-run the query."
+                ),
+                "model_used": model_name,
+                "status": "error",
+                "docs_analyzed": 0,
+            }
+
+        resolved_model = config.resolve_model_name(model_name)
+        model_display = config.ALL_MODELS.get(resolved_model, resolved_model)
+
+        # 1. Primary: Use Mistral SDK Client
+        try:
+            try:
+                from mistralai.client import Mistral
+            except ImportError:
+                from mistralai import Mistral
+
+            logger.info(f"Invoking Mistral API model '{resolved_model}' via Mistral SDK...")
+            with Mistral(api_key=api_key) as client:
+                res = client.chat.complete(
+                    model=resolved_model,
+                    messages=[
+                        {"role": "system", "content": system_instruction},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.2,
+                )
+                summary_text = res.choices[0].message.content
+                if summary_text and summary_text.strip():
+                    return {
+                        "summary": summary_text.strip(),
+                        "model_used": model_display,
+                        "status": "success",
+                        "docs_analyzed": total_docs,
+                    }
+        except Exception as sdk_err:
+            logger.warning(f"Mistral SDK call encountered error: {sdk_err}. Falling back to Mistral REST API...")
+
+        # 2. Resilient fallback: Direct HTTP REST call to https://api.mistral.ai/v1/chat/completions
+        try:
+            logger.info(f"Invoking Mistral REST API for '{resolved_model}'...")
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": resolved_model,
+                "messages": [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.2,
+            }
+            resp = requests.post(
+                f"{config.MISTRAL_API_BASE_URL}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=self.mistral_timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            summary_text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            if summary_text:
+                return {
+                    "summary": summary_text,
+                    "model_used": model_display,
+                    "status": "success",
+                    "docs_analyzed": total_docs,
+                }
+            raise ValueError("Mistral REST API returned empty choices")
+        except Exception as http_err:
+            logger.error(f"Mistral API generation error: {http_err}")
+            return {
+                "summary": f"Mistral API generation failed: {http_err}",
+                "model_used": model_name,
+                "status": "error",
+                "docs_analyzed": 0,
+            }
+

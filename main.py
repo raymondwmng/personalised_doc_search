@@ -33,7 +33,7 @@ def main():
     parser = argparse.ArgumentParser(description="Personalised EUR-Lex Document Search POC")
     parser.add_argument("--ui", action="store_true", default=True, help="Launch Streamlit Web UI (default)")
     parser.add_argument("--search", type=str, help="Run a quick command-line search query")
-    parser.add_argument("--model", type=str, default=config.DEFAULT_ANALYTICAL_MODEL, help="Ollama model to use")
+    parser.add_argument("--model", type=str, default=config.DEFAULT_ANALYTICAL_MODEL, help="Model to use (Mistral API e.g. mistral-large-4 / mistral-small-2603, or local Ollama)")
     parser.add_argument("--memory", action="store_true", default=True, help="Enable memory prompt")
     args, unknown = parser.parse_known_args()
 

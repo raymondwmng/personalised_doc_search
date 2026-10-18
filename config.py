@@ -37,7 +37,13 @@ EMBEDDING_DIM = 384
 FAISS_INDEX_PATH = INDEX_DIR / "faiss_flat_ip.index"
 CHUNK_METADATA_PATH = INDEX_DIR / "chunk_meta.jsonl"
 
-# Ollama Models & Inference Settings
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv(BASE_DIR / ".env")
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
+
+# Ollama Models & Inference Settings (Local)
 OLLAMA_MODELS = {
     "gemma2:9b": "gemma2:9b (High Legal Comprehension)",
     "llama3.1:8b": "llama3.1:8b (Structured / Tool Tuning)",
@@ -45,11 +51,48 @@ OLLAMA_MODELS = {
     "mistral:7b": "mistral:7b (Balanced)",
     "llama3.2:3b": "llama3.2:3b (Ultra Fast)",
 }
-DEFAULT_ANALYTICAL_MODEL = "gemma2:9b"
+
+# Mistral API Models (Cloud)
+MISTRAL_MODELS = {
+    "mistral-large-4": "mistral-large-4",
+    "mistral-small-2603": "mistral-small-2603",
+}
+
+# Display annotations for Mistral models
+MISTRAL_MODEL_ANNOTATIONS = {
+    "mistral-large-4": "gpt-5 alternative",
+    "mistral-small-2603": "gpt-5-mini alternative",
+}
+
+# Combined Models for UI & Summarisation (Annotated display format)
+ALL_MODELS = {
+    "mistral-large-4": f"mistral-large-4 ({MISTRAL_MODEL_ANNOTATIONS['mistral-large-4']})",
+    "mistral-small-2603": f"mistral-small-2603 ({MISTRAL_MODEL_ANNOTATIONS['mistral-small-2603']})",
+    **OLLAMA_MODELS,
+}
+
+DEFAULT_ANALYTICAL_MODEL = "mistral-large-4"
 DEFAULT_STRUCTURED_MODEL = "llama3.1:8b"
 DEFAULT_FALLBACK_MODEL = "gemma3:4b"
 DEFAULT_OLLAMA_TIMEOUT = 25.0
+DEFAULT_MISTRAL_TIMEOUT = 45.0
 DEFAULT_NUM_CTX = 4096
+MISTRAL_API_BASE_URL = "https://api.mistral.ai/v1"
+
+
+def is_mistral_model(model_name: str) -> bool:
+    """Checks whether the requested model is a Mistral API cloud model."""
+    if not model_name:
+        return False
+    return model_name.strip().lower() in MISTRAL_MODELS
+
+
+def resolve_model_name(model_name: str) -> str:
+    """Resolves model name to canonical ID."""
+    clean = model_name.strip().lower()
+    return MISTRAL_MODELS.get(clean, model_name)
+
+
 
 # Predefined Taxonomy Mapping
 TAXONOMY = {

@@ -84,6 +84,7 @@ class LegalSummariser:
         model_name: Optional[str] = None,
         memory_context: Optional[str] = None,
         max_docs: int = 5,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Generates a comprehensive cross-document legal synthesis covering all retrieved documents."""
         if not retrieved_docs:
@@ -141,6 +142,7 @@ class LegalSummariser:
                 system_instruction=system_instruction,
                 user_prompt=user_prompt,
                 total_docs=total_docs,
+                max_tokens=max_tokens,
             )
             if mistral_res.get("status") == "success":
                 return mistral_res
@@ -198,10 +200,12 @@ class LegalSummariser:
         system_instruction: str,
         user_prompt: str,
         total_docs: int,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Calls Mistral AI API for legal synthesis using Mistral client or HTTP REST fallback.
         
         Uses the MISTRAL_API_KEY stored in .env without exposing the key in code.
+        Supports max_tokens to strictly control token consumption and credit usage.
         """
         api_key = config.MISTRAL_API_KEY or os.getenv("MISTRAL_API_KEY", "")
         if not api_key:
@@ -227,6 +231,10 @@ class LegalSummariser:
                 from mistralai import Mistral
 
             logger.info(f"Invoking Mistral API model '{resolved_model}' via Mistral SDK...")
+            sdk_kwargs = {}
+            if max_tokens is not None:
+                sdk_kwargs["max_tokens"] = max_tokens
+
             with Mistral(api_key=api_key) as client:
                 res = client.chat.complete(
                     model=resolved_model,
@@ -235,14 +243,22 @@ class LegalSummariser:
                         {"role": "user", "content": user_prompt},
                     ],
                     temperature=0.2,
+                    **sdk_kwargs,
                 )
                 summary_text = res.choices[0].message.content
                 if summary_text and summary_text.strip():
+                    usage_obj = getattr(res, "usage", None)
+                    usage = {
+                        "prompt_tokens": getattr(usage_obj, "prompt_tokens", None),
+                        "completion_tokens": getattr(usage_obj, "completion_tokens", None),
+                        "total_tokens": getattr(usage_obj, "total_tokens", None),
+                    } if usage_obj else {}
                     return {
                         "summary": summary_text.strip(),
                         "model_used": model_display,
                         "status": "success",
                         "docs_analyzed": total_docs,
+                        "usage": usage,
                     }
         except Exception as sdk_err:
             logger.warning(f"Mistral SDK call encountered error: {sdk_err}. Falling back to Mistral REST API...")
@@ -262,6 +278,9 @@ class LegalSummariser:
                 ],
                 "temperature": 0.2,
             }
+            if max_tokens is not None:
+                payload["max_tokens"] = max_tokens
+
             resp = requests.post(
                 f"{config.MISTRAL_API_BASE_URL}/chat/completions",
                 headers=headers,
@@ -271,12 +290,14 @@ class LegalSummariser:
             resp.raise_for_status()
             data = resp.json()
             summary_text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            usage = data.get("usage", {})
             if summary_text:
                 return {
                     "summary": summary_text,
                     "model_used": model_display,
                     "status": "success",
                     "docs_analyzed": total_docs,
+                    "usage": usage,
                 }
             raise ValueError("Mistral REST API returned empty choices")
         except Exception as http_err:

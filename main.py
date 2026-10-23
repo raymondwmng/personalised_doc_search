@@ -34,6 +34,8 @@ def main():
     parser.add_argument("--ui", action="store_true", default=True, help="Launch Streamlit Web UI (default)")
     parser.add_argument("--search", type=str, help="Run a quick command-line search query")
     parser.add_argument("--model", type=str, default=config.DEFAULT_ANALYTICAL_MODEL, help="Model to use (Mistral API e.g. mistral-large-4 / mistral-small-2603, or local Ollama)")
+    parser.add_argument("--top-docs", type=int, default=5, help="Number of retrieved documents (default: 5)")
+    parser.add_argument("--max-tokens", type=int, default=None, help="Max tokens for LLM generation (conserves API credit)")
     parser.add_argument("--memory", action="store_true", default=True, help="Enable memory prompt")
     args, unknown = parser.parse_known_args()
 
@@ -45,7 +47,7 @@ def main():
         print(f"\n[Query]: {args.search}")
         mem = UserMemoryStore()
         searcher = SearchEngine(memory_store=mem)
-        results = searcher.search(args.search, top_n_docs=5, enable_memory=args.memory)
+        results = searcher.search(args.search, top_n_docs=args.top_docs, enable_memory=args.memory)
         print(f"Retrieved {len(results)} relevant documents.\n")
 
         for idx, doc in enumerate(results, 1):
@@ -63,9 +65,13 @@ def main():
             model_name=args.model,
             memory_context=mem_ctx,
             max_docs=len(results),
+            max_tokens=args.max_tokens,
         )
         print(f"\n--- Executive Summary (Synthesised across {summary_res.get('docs_analyzed', len(results))} Acts) ---")
         print(summary_res.get("summary"))
+        if summary_res.get("usage"):
+            u = summary_res["usage"]
+            print(f"\n[Token Usage]: Prompt: {u.get('prompt_tokens', 'N/A')} | Completion: {u.get('completion_tokens', 'N/A')} | Total: {u.get('total_tokens', 'N/A')}")
         return
 
     launch_streamlit()

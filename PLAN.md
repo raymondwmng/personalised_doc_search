@@ -785,17 +785,17 @@ dependencies = [
 
 ### Stage 2 — Extended (~2-8 hours)
 
-- [ ] Long-Context Embedding & Hierarchical Chunking Study (Section 3.2.2):
-  - [ ] Implement benchmark suite in `experiments/long_context_embed_study/`
-  - [ ] Benchmark `answerdotai/ModernBERT-base` (8K context, RoPE, FlashAttention-2, unpadding)
-  - [ ] Benchmark `nomic-ai/nomic-embed-text-v1.5` (8K context, Matryoshka 768/512/256, `search_query:` prefix)
-  - [ ] Benchmark `BAAI/bge-m3` (8K context, multi-lingual, dense + sparse lexical weights)
-  - [ ] Benchmark `jinaai/jina-embeddings-v2-base-en` (8K context, ALiBi linear biases)
-  - [ ] Benchmark `dmis-lab/UltraBERT-Embed-150M` (32K context, instruction-prompted, SOTA MTEB v2)
-  - [ ] Evaluate multi-tier chunking regimes: Micro (400t) vs Meso (2,000t) vs Macro (8K–32Kt full-act)
-  - [ ] Measure retrieval metrics ($P@1, P@5, \text{MRR}$) on the 9-query benchmark across Singularity, Multi-Match, and Zero-Match cases
-  - [ ] Benchmark GPU VRAM and batch inference throughput on NVIDIA RTX A2000 (8GB VRAM, CUDA 13.2)
-  - [ ] Evaluate downstream synthesis and graceful refusal with `mistral-small-2603`
+- [x] Long-Context Embedding & Hierarchical Chunking Study (Section 3.2.2) — *Completed (see [RESEARCH_REPORT.md](file:///home/speechray/github/personalised_doc_search/experiments/long_context_embed_study/RESEARCH_REPORT.md))*:
+  - [x] Implement benchmark suite in `experiments/long_context_embed_study/`
+  - [x] Benchmark `answerdotai/ModernBERT-base` (8K context, RoPE, FlashAttention-2, unpadding)
+  - [x] Benchmark `nomic-ai/nomic-embed-text-v1.5` (8K context, Matryoshka 768/512/256, `search_query:` prefix)
+  - [x] Benchmark `BAAI/bge-m3` (8K context, multi-lingual, dense + sparse lexical weights)
+  - [x] Benchmark `jinaai/jina-embeddings-v2-base-en` (8K context, ALiBi linear biases)
+  - [x] Benchmark `dmis-lab/UltraBERT-Embed-150M` (32K context, instruction-prompted, SOTA MTEB v2)
+  - [x] Evaluate multi-tier chunking regimes: Micro (400t) vs Meso (2,000t) vs Macro (8K–32Kt full-act)
+  - [x] Measure retrieval metrics ($P@1, P@5, \text{MRR}$) on the 9-query benchmark across Singularity, Multi-Match, and Zero-Match cases
+  - [x] Benchmark GPU VRAM and batch inference throughput on NVIDIA RTX A2000 (8GB VRAM, CUDA 13.2)
+  - [x] Evaluate downstream synthesis and graceful refusal with `mistral-small-2603`
 - [ ] Legal-BERT embedding upgrade & domain-specific comparison
 - [ ] Legal-BERT / zero-shot tagger
 - [ ] Azure Document Intelligence integration

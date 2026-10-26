@@ -15,7 +15,7 @@ dependencies = [
     "torch>=2.4",
     "faiss-cpu>=1.8",
     "scikit-learn>=1.5",
-    "transformers>=4.44",
+    "transformers>=5.0.0",
     "numpy>=1.26",
     "pandas>=2.2",
     "ollama>=0.3",
@@ -23,4 +23,5 @@ dependencies = [
     "torchvision>=0.29.1",
     "mistralai>=3.2.0",
     "python-dotenv>=1.2.4",
+    "einops>=0.8.2",
 ]

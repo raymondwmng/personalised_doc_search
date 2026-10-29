@@ -93,13 +93,42 @@ class LegalDocParser:
         words = text.split()
         return max(1, int(len(words) * 1.3))
 
+    def detect_document_complexity(self, html_or_text: str) -> Dict[str, Any]:
+        """Detects layout and structural complexity for Document Intelligence routing."""
+        table_count = len(re.findall(r"<table\b", html_or_text, re.IGNORECASE))
+        row_count = len(re.findall(r"<tr\b", html_or_text, re.IGNORECASE))
+        annex_count = len(re.findall(r"(?:Annex|ANNEX)\s+[IVXLCDM\d]+", html_or_text))
+        article_count = len(re.findall(r"(?:Article|ARTICLE)\s+\d+", html_or_text))
+        is_complex = table_count >= 2 or row_count >= 10 or annex_count >= 2
+        return {
+            "is_complex": is_complex,
+            "table_count": table_count,
+            "row_count": row_count,
+            "annex_count": annex_count,
+            "article_count": article_count,
+            "recommended_extractor": "azure_layout" if is_complex else "html_parser",
+        }
+
     def chunk_text(
         self,
         text: str,
+        celex: str = "",
+        title: str = "",
         target_tokens: int = config.CHUNK_SIZE_TOKENS,
         overlap_tokens: int = config.CHUNK_OVERLAP_TOKENS,
+        regime: str = "meso",
     ) -> List[Tuple[int, str, int]]:
-        """Splits text into chunks of ~target_tokens with ~overlap_tokens overlap.
+        """Splits text into chunks under the specified granularity regime.
+        
+        Args:
+            text: Clean document text
+            celex: Document CELEX identifier for provenance header
+            title: Document title
+            target_tokens: Target chunk size (default: 2,000 for Meso, Rec 3)
+            overlap_tokens: Overlap size (default: 200 for Meso)
+            regime: 'meso' (~2000 tokens, thematic chapter chunks with provenance),
+                    'micro' (~400 tokens, article-level with structural boundaries),
+                    'macro' (full-act up to 32K tokens)
         
         Returns:
             List of (chunk_index, chunk_text, token_count)
@@ -107,49 +136,192 @@ class LegalDocParser:
         if not text.strip():
             return []
 
-        # Target character window calculated from token targets
-        target_chars = target_tokens * 4
-        overlap_chars = overlap_tokens * 4
+        if regime == "macro":
+            tokens = self.approximate_token_count(text)
+            header = f"Document {celex} — {title}\n\n" if (celex or title) else ""
+            return [(0, f"{header}{text}".strip(), tokens)]
 
-        paragraphs = text.split("\n\n")
-        chunks = []
-        current_chunk_paragraphs = []
-        current_length = 0
+        if regime == "micro":
+            # Article-level splitting on structural boundaries
+            pattern = r"(?=(?:(?:Article|ARTICLE)\s+\d+|(?:Whereas|WHEREAS)\s*\(?\d*\)?|(?:Chapter|CHAPTER)\s+[IVXLCDM\d]+))"
+            sections = [s.strip() for s in re.split(pattern, text) if s.strip()]
+            if not sections:
+                sections = [p.strip() for p in text.split("\n\n") if p.strip()]
+            target_chars = target_tokens * 4
+            overlap_chars = overlap_tokens * 4
+            chunks = []
+            current_buf = []
+            current_len = 0
 
-        for para in paragraphs:
-            para = para.strip()
-            if not para:
-                continue
+            for sec in sections:
+                sec_len = len(sec)
+                if current_len + sec_len > target_chars and current_buf:
+                    chunk_str = "\n\n".join(current_buf).strip()
+                    tokens = self.approximate_token_count(chunk_str)
+                    chunks.append((len(chunks), chunk_str, tokens))
+                    keep = []
+                    k_len = 0
+                    for item in reversed(current_buf):
+                        if k_len + len(item) <= overlap_chars:
+                            keep.insert(0, item)
+                            k_len += len(item)
+                        else:
+                            break
+                    current_buf = keep
+                    current_len = k_len
+                current_buf.append(sec)
+                current_len += sec_len
 
-            para_len = len(para)
-            if current_length + para_len > target_chars and current_chunk_paragraphs:
-                # Flush current chunk
-                chunk_str = "\n\n".join(current_chunk_paragraphs).strip()
+            if current_buf:
+                chunk_str = "\n\n".join(current_buf).strip()
                 tokens = self.approximate_token_count(chunk_str)
                 chunks.append((len(chunks), chunk_str, tokens))
+            return chunks
 
-                # Slide window with overlap: keep the tail paragraphs
-                keep_paragraphs = []
-                keep_length = 0
-                for p in reversed(current_chunk_paragraphs):
-                    if keep_length + len(p) <= overlap_chars:
-                        keep_paragraphs.insert(0, p)
-                        keep_length += len(p)
+        # Default: Regime B (Meso ~2000 tokens standard chunking, Rec 3)
+        target_chars = target_tokens * 4
+        overlap_chars = overlap_tokens * 4
+        provenance_header = f"Document {celex} — {title}\n\n" if (celex or title) else ""
+
+        # First try splitting by paragraphs
+        raw_sections = [p.strip() for p in text.split("\n\n") if p.strip()]
+
+        # If text is monolithic (e.g. collapsed newlines in raw dataset), split on structural legal boundaries
+        if len(raw_sections) <= 1:
+            pattern = r"(?=(?:(?:Article|ARTICLE)\s+\d+|(?:Whereas|WHEREAS)\s*\(?\d*\)?|(?:Chapter|CHAPTER)\s+[IVXLCDM\d]+|(?:Annex|ANNEX)\s+[IVXLCDM\d]+))"
+            raw_sections = [s.strip() for s in re.split(pattern, text) if s.strip()]
+
+        # If still only 1 block and large, split on sentence boundaries
+        sections = []
+        for sec in raw_sections:
+            if len(sec) > target_chars:
+                sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", sec)
+                sections.extend([s.strip() for s in sentences if s.strip()])
+            else:
+                sections.append(sec)
+
+        if not sections:
+            sections = [text]
+
+        chunks = []
+        current_buf = []
+        current_len = 0
+
+        for sec in sections:
+            sec_len = len(sec)
+            if current_len + sec_len > target_chars and current_buf:
+                chunk_content = "\n\n".join(current_buf).strip()
+                full_chunk_text = f"{provenance_header}{chunk_content}".strip()
+                tokens = self.approximate_token_count(full_chunk_text)
+                chunks.append((len(chunks), full_chunk_text, tokens))
+
+                # Sliding overlap
+                keep = []
+                k_len = 0
+                for item in reversed(current_buf):
+                    if k_len + len(item) <= overlap_chars:
+                        keep.insert(0, item)
+                        k_len += len(item)
                     else:
                         break
-                current_chunk_paragraphs = keep_paragraphs
-                current_length = keep_length
+                current_buf = keep
+                current_len = k_len
 
-            current_chunk_paragraphs.append(para)
-            current_length += para_len
+            current_buf.append(sec)
+            current_len += sec_len
 
-        # Flush remainder
-        if current_chunk_paragraphs:
-            chunk_str = "\n\n".join(current_chunk_paragraphs).strip()
-            tokens = self.approximate_token_count(chunk_str)
-            chunks.append((len(chunks), chunk_str, tokens))
+        if current_buf:
+            chunk_content = "\n\n".join(current_buf).strip()
+            full_chunk_text = f"{provenance_header}{chunk_content}".strip()
+            tokens = self.approximate_token_count(full_chunk_text)
+            chunks.append((len(chunks), full_chunk_text, tokens))
 
         return chunks
+
+    def rechunk_database(
+        self,
+        regime: str = "meso",
+        target_tokens: int = config.CHUNK_SIZE_TOKENS,
+        overlap_tokens: int = config.CHUNK_OVERLAP_TOKENS,
+        limit: Optional[int] = None,
+        batch_commit_size: int = 500,
+    ) -> Dict[str, int]:
+        """Re-chunks existing documents in documents.db under the specified regime (e.g. Meso ~2000t).
+        
+        Returns:
+            Dict containing total documents processed and total chunks created.
+        """
+        logger.info(f"Re-chunking database using regime='{regime}', target_tokens={target_tokens}, overlap={overlap_tokens}...")
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            query = "SELECT id, celex, title, full_text FROM documents"
+            if limit:
+                query += f" LIMIT {limit}"
+            cursor.execute(query)
+            docs = cursor.fetchall()
+
+        if not docs:
+            logger.warning("No documents found in documents table.")
+            return {"docs_processed": 0, "chunks_created": 0}
+
+        total_chunks = 0
+        doc_count = len(docs)
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # If rechunking all documents, clear existing chunks
+            if limit is None or limit >= doc_count:
+                cursor.execute("DELETE FROM chunks")
+                conn.commit()
+
+            pending_chunk_records = []
+            for i, doc in enumerate(docs, 1):
+                doc_id = doc["id"]
+                celex = doc["celex"] or ""
+                title = doc["title"] or ""
+                full_text = doc["full_text"] or ""
+
+                if not full_text.strip():
+                    continue
+
+                if limit is not None:
+                    # Clear this specific doc's chunks
+                    cursor.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
+
+                chunks = self.chunk_text(
+                    text=full_text,
+                    celex=celex,
+                    title=title,
+                    target_tokens=target_tokens,
+                    overlap_tokens=overlap_tokens,
+                    regime=regime,
+                )
+
+                for chunk_idx, chunk_text, tok_count in chunks:
+                    pending_chunk_records.append((doc_id, chunk_idx, chunk_text, tok_count))
+                    total_chunks += 1
+
+                if len(pending_chunk_records) >= batch_commit_size:
+                    cursor.executemany("""
+                    INSERT INTO chunks (doc_id, chunk_idx, text, token_count)
+                    VALUES (?, ?, ?, ?)
+                    """, pending_chunk_records)
+                    conn.commit()
+                    pending_chunk_records = []
+
+                if i % 1000 == 0 or i == doc_count:
+                    logger.info(f"Processed {i}/{doc_count} documents ({total_chunks} chunks generated)...")
+
+            if pending_chunk_records:
+                cursor.executemany("""
+                INSERT INTO chunks (doc_id, chunk_idx, text, token_count)
+                VALUES (?, ?, ?, ?)
+                """, pending_chunk_records)
+                conn.commit()
+
+        logger.info(f"Re-chunking complete: {doc_count} documents -> {total_chunks} Meso chunks.")
+        return {"docs_processed": doc_count, "chunks_created": total_chunks}
+
 
     def process_and_store_document(
         self,
@@ -172,7 +344,7 @@ class LegalDocParser:
             logger.warning(f"Skipping empty document CELEX: {celex}")
             return None
 
-        chunks = self.chunk_text(clean_text)
+        chunks = self.chunk_text(clean_text, celex=celex, title=title, regime="meso")
 
         with self.get_connection() as conn:
             cursor = conn.cursor()

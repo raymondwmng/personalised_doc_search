@@ -121,17 +121,31 @@ class LegalSummariser:
         user_content_parts.append(
             f"=== RETRIEVED DOCUMENT EXCERPTS ({total_docs} DOCUMENTS) ===\n{excerpts_text}\n=== END OF EXCERPTS ===\n"
         )
-        user_content_parts.append(
-            f"### MANDATORY SYNTHESIS INSTRUCTIONS:\n"
-            f"1. **Cross-Document Executive Summary**: Synthesise insights across ALL {total_docs} retrieved documents. "
-            f"Do NOT focus only on the last document or a single document.\n"
-            f"2. **Cross-Document Findings & Comparison**: Explicitly address and cite EACH relevant retrieved document "
-            f"using both its index and CELEX ([Doc 1, CELEX ...], [Doc 2, CELEX ...], etc.). Group common legal themes "
-            f"and explain what each document establishes regarding the user's query.\n"
-            f"3. **Industry / Sector Impact**: Detail which business sectors and entities are affected across the retrieved corpus.\n"
-            f"4. **Regulatory Trajectory & Takeaways**: Provide an actionable takeaway for the user's query based on these legal instruments.\n"
-            f"5. Format the briefing clearly with clean Markdown headings and structured bullet points."
-        )
+
+        # Check for Case 3 Zero-Match condition (Out-of-domain query below null threshold 0.50)
+        is_case_3_zero_match = all(d.get("is_below_null_threshold", False) for d in retrieved_docs[:total_docs])
+
+        if is_case_3_zero_match:
+            user_content_parts.append(
+                f"### MANDATORY REFUSAL INSTRUCTIONS (Case 3 Zero-Match Rejection):\n"
+                f"The similarity scores for all retrieved documents fall below the calibrated threshold (0.50). "
+                f"These documents do NOT substantively govern the user's query '{query.strip()}'.\n"
+                f"1. **Graceful Refusal**: Begin with an explicit statement: 'Graceful Refusal (Case 3): No Relevant EU Legislation Identified.'\n"
+                f"2. Explain clearly that the retrieved European Union legislative acts do not regulate or address this subject.\n"
+                f"3. Briefly state why the closest retrieved distractor documents do not apply, preventing any legal hallucination.\n"
+            )
+        else:
+            user_content_parts.append(
+                f"### MANDATORY SYNTHESIS INSTRUCTIONS:\n"
+                f"1. **Cross-Document Executive Summary**: Synthesise insights across ALL {total_docs} retrieved documents. "
+                f"Do NOT focus only on the last document or a single document.\n"
+                f"2. **Cross-Document Findings & Comparison**: Explicitly address and cite EACH relevant retrieved document "
+                f"using both its index and CELEX ([Doc 1, CELEX ...], [Doc 2, CELEX ...], etc.). Group common legal themes "
+                f"and explain what each document establishes regarding the user's query.\n"
+                f"3. **Industry / Sector Impact**: Detail which business sectors and entities are affected across the retrieved corpus.\n"
+                f"4. **Regulatory Trajectory & Takeaways**: Provide an actionable takeaway for the user's query based on these legal instruments.\n"
+                f"5. Format the briefing clearly with clean Markdown headings and structured bullet points."
+            )
 
         user_prompt = "\n".join(user_content_parts)
 

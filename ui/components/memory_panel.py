@@ -41,6 +41,14 @@ def _cb_clear_all(memory_store: UserMemoryStore) -> None:
     st.session_state["mem_status_notification"] = ("info", "🗑️ Memory cleared.")
 
 
+def _cb_synthesise_persona(memory_store: UserMemoryStore) -> None:
+    """Callback to synthesise a cohesive user persona from search interaction history."""
+    persona = memory_store.synthesise_memory_profile()
+    st.session_state["mem_user_context_input"] = persona
+    st.session_state["mem_status_notification"] = ("success", "🤖 Synthesised legal research profile from history!")
+
+
+
 def _cb_add_custom_tag(memory_store: UserMemoryStore) -> None:
     """Callback triggered before widget instantiation to add and activate a custom taxonomy tag."""
     tag_name = st.session_state.get("custom_tag_name_input", "").strip()
@@ -229,14 +237,34 @@ def render_memory_panel(memory_store: UserMemoryStore) -> None:
             key="btn_clear_mem_all",
         )
 
-        # Download / export memory JSON
-        st.download_button(
-            label="📥 Export Memory JSON",
-            data=json.dumps(mem_data, indent=2),
-            file_name="prompt_context.json",
-            mime="application/json",
+        # Auto-synthesise persona from recent interaction history
+        st.button(
+            "🤖 Synthesise Persona from History",
+            on_click=_cb_synthesise_persona,
+            args=(memory_store,),
             use_container_width=True,
+            help="Uses local LLM to synthesise your recent search themes into a cohesive legal persona",
+            key="btn_synthesise_persona",
         )
+
+        # Download / export memory JSON and Markdown
+        col_exp1, col_exp2 = st.columns(2)
+        with col_exp1:
+            st.download_button(
+                label="📥 JSON",
+                data=memory_store.export_memory_json(),
+                file_name="prompt_context.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+        with col_exp2:
+            st.download_button(
+                label="📄 Markdown",
+                data=memory_store.export_memory_markdown(),
+                file_name="prompt_context.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
 
     # Collapsible Custom Tag Additions
     with st.sidebar.expander("➕ Add Custom Topic or Sector", expanded=False):

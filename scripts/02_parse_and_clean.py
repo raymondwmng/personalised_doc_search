@@ -35,6 +35,18 @@ def main():
         help="Target SQLite DB path",
     )
     parser.add_argument(
+        "--rechunk",
+        action="store_true",
+        help="Re-chunk existing documents in documents.db using specified regime (e.g. Meso ~2000 tokens)",
+    )
+    parser.add_argument(
+        "--regime",
+        type=str,
+        default="meso",
+        choices=["meso", "micro", "macro"],
+        help="Chunking regime to apply (default: meso, Rec 3)",
+    )
+    parser.add_argument(
         "--from-kaggle",
         action="store_true",
         help="Parse directly from Kaggle EurLex CSV instead of data/raw files",
@@ -48,6 +60,16 @@ def main():
     args = parser.parse_args()
 
     doc_parser = LegalDocParser(db_path=Path(args.db_path))
+
+    if args.rechunk:
+        logger.info(f"Re-chunking documents with regime={args.regime} (target_tokens={config.CHUNK_SIZE_TOKENS})...")
+        res = doc_parser.rechunk_database(
+            regime=args.regime,
+            target_tokens=config.CHUNK_SIZE_TOKENS,
+            overlap_tokens=config.CHUNK_OVERLAP_TOKENS,
+        )
+        logger.info(f"Re-chunking finished: {res}")
+        return
 
     if args.from_kaggle:
         logger.info(f"Parsing directly from Kaggle CSV with limit={args.limit}...")

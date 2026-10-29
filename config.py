@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 # Base Paths
 BASE_DIR = Path(__file__).resolve().parent
@@ -25,17 +26,66 @@ EURLEX_KAGGLE_DIR = DATA_DIR / "eurlex_kaggle"
 EURLEX_KAGGLE_CSV = EURLEX_KAGGLE_DIR / "EurLex_all.csv"
 DEFAULT_LOAD_LIMIT = 1000
 
-# Chunking Configuration
-CHUNK_SIZE_TOKENS = 400
-CHUNK_OVERLAP_TOKENS = 50
-CHUNK_APPROX_CHARS = 1600
-CHUNK_OVERLAP_CHARS = 200
+# Chunking Configuration (Recommendation 3: Meso ~2000 tokens standard chunking)
+CHUNK_SIZE_TOKENS = 2000
+CHUNK_OVERLAP_TOKENS = 200
+CHUNK_APPROX_CHARS = 8000
+CHUNK_OVERLAP_CHARS = 800
 
-# Embedding Configuration
-EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-EMBEDDING_DIM = 384
-FAISS_INDEX_PATH = INDEX_DIR / "faiss_flat_ip.index"
-CHUNK_METADATA_PATH = INDEX_DIR / "chunk_meta.jsonl"
+# Supported Embedding Models (Recommendation 1 & 2)
+SUPPORTED_EMBEDDING_MODELS = {
+    "bge-m3": {
+        "id": "bge-m3",
+        "name": "BAAI/bge-m3",
+        "display_name": "BAAI/bge-m3 (Multilingual EU, 567M, 1024d)",
+        "dim": 1024,
+        "context_window": 8192,
+        "max_seq_length": 2048,  # Cap sequence length for RTX A2000 VRAM stability
+        "index_path": INDEX_DIR / "faiss_bge_m3.index",
+        "meta_path": INDEX_DIR / "chunk_meta_bge_m3.jsonl",
+        "bm25_path": INDEX_DIR / "bm25_bge_m3.pkl",
+        "threshold": 0.50,  # Calibrated null cutoff (Rec 5)
+    },
+    "modernbert": {
+        "id": "modernbert",
+        "name": "nomic-ai/modernbert-embed-base",
+        "display_name": "ModernBERT-base (High Throughput, 149M, 768d)",
+        "dim": 768,
+        "context_window": 8192,
+        "max_seq_length": 2048,
+        "index_path": INDEX_DIR / "faiss_modernbert.index",
+        "meta_path": INDEX_DIR / "chunk_meta_modernbert.jsonl",
+        "bm25_path": INDEX_DIR / "bm25_modernbert.pkl",
+        "threshold": 0.50,
+    },
+}
+
+DEFAULT_EMBEDDING_MODEL = "bge-m3"
+
+# Active Model Aliases (backwards compatibility)
+EMBEDDING_MODEL_NAME = SUPPORTED_EMBEDDING_MODELS[DEFAULT_EMBEDDING_MODEL]["name"]
+EMBEDDING_DIM = SUPPORTED_EMBEDDING_MODELS[DEFAULT_EMBEDDING_MODEL]["dim"]
+FAISS_INDEX_PATH = SUPPORTED_EMBEDDING_MODELS[DEFAULT_EMBEDDING_MODEL]["index_path"]
+CHUNK_METADATA_PATH = SUPPORTED_EMBEDDING_MODELS[DEFAULT_EMBEDDING_MODEL]["meta_path"]
+NULL_REJECTION_THRESHOLD = 0.50
+
+# Hybrid Retrieval & Re-ranking Configuration (Section 4.6)
+ENABLE_HYBRID_SEARCH = True
+ENABLE_CROSS_ENCODER = True
+BM25_WEIGHT = 0.3
+DENSE_WEIGHT = 0.7
+CROSS_ENCODER_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+# Azure Document Intelligence Configuration (Section 4.3)
+AZURE_DOC_INTEL_ENDPOINT = os.getenv("AZURE_DOC_INTEL_ENDPOINT", "")
+AZURE_DOC_INTEL_KEY = os.getenv("AZURE_DOC_INTEL_KEY", "")
+AZURE_DOC_INTEL_BUDGET_PAGES = 500
+
+# Legal-BERT Tagging Configuration (Section 4.2)
+LEGAL_BERT_MODEL = "nlpaueb/legal-bert-base-uncased"
+
+# Benchmark Results Path (Section 4.5)
+BENCHMARK_RESULTS_PATH = DATA_DIR / "benchmark_results.json"
 
 from dotenv import load_dotenv
 
@@ -91,6 +141,20 @@ def resolve_model_name(model_name: str) -> str:
     """Resolves model name to canonical ID."""
     clean = model_name.strip().lower()
     return MISTRAL_MODELS.get(clean, model_name)
+
+
+def resolve_embedding_spec(model_key_or_name: Optional[str] = None) -> dict:
+    """Resolves embedding model key or name to its specification dict."""
+    if not model_key_or_name:
+        return SUPPORTED_EMBEDDING_MODELS[DEFAULT_EMBEDDING_MODEL]
+    clean = model_key_or_name.strip().lower()
+    if clean in SUPPORTED_EMBEDDING_MODELS:
+        return SUPPORTED_EMBEDDING_MODELS[clean]
+    for key, spec in SUPPORTED_EMBEDDING_MODELS.items():
+        if clean == spec["name"].lower() or clean in spec["display_name"].lower():
+            return spec
+    return SUPPORTED_EMBEDDING_MODELS[DEFAULT_EMBEDDING_MODEL]
+
 
 
 

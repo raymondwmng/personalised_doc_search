@@ -796,14 +796,14 @@ dependencies = [
   - [x] Measure retrieval metrics ($P@1, P@5, \text{MRR}$) on the 9-query benchmark across Singularity, Multi-Match, and Zero-Match cases
   - [x] Benchmark GPU VRAM and batch inference throughput on NVIDIA RTX A2000 (8GB VRAM, CUDA 13.2)
   - [x] Evaluate downstream synthesis and graceful refusal with `mistral-small-2603`
-- [ ] Legal-BERT embedding upgrade & domain-specific comparison
-- [ ] Legal-BERT / zero-shot tagger
-- [ ] Azure Document Intelligence integration
-- [ ] Model benchmarking script
-- [ ] Hybrid BM25 + semantic retrieval
-- [ ] Query expansion with EuroVoc synonyms
-- [ ] Memory prompt summarisation loop
-- [ ] UI polish (filters, pagination, custom CSS)
+- [x] Dual-Model Embedding Upgrade (Rec 1 & 2): Supported `BAAI/bge-m3` (567M, 1024d) and `ModernBERT-base` (149M, 768d) under Meso ~2,000 tokens standard chunking (Rec 3) with dynamic sequence capping (2048t) and FAISS IndexFlatIP.
+- [x] Legal-BERT / Semantic Zero-Shot Tagger (Section 4.2): `src/tagger_bert.py` and `scripts/03_tag_documents.py` classifying documents into 3-dimensional taxonomy with confidence scoring.
+- [x] Azure Document Intelligence Integration (Section 4.3): `src/tagger_api.py` and `scripts/05_tag_with_api.py` with structural complexity assessment, Layout vs Read routing, table extraction, and £5 budget tracking.
+- [x] Ollama Model Benchmarking Suite (Section 4.5): `scripts/benchmark_models.py` evaluating installed local LLMs across 5 representative EUR-Lex legal queries with 4K and 6K context windows.
+- [x] Hybrid BM25 + Semantic Retrieval (Section 4.6): Multi-model indexing with `BM25Okapi` + FAISS dense fusion and cross-encoder re-ranking (`cross-encoder/ms-marco-MiniLM-L-6-v2`).
+- [x] Query Expansion with EuroVoc Synonyms (Section 4.6): Automatic expansion of EU legal concepts and statutory terms in `src/searcher.py`.
+- [x] Memory Prompt Interaction Accumulation & Summarisation Loop (Section 4.4): `src/memory.py` rolling interaction accumulator, automated persona synthesis via local LLM, and JSON/Markdown export.
+- [x] UI Polish & Dual-Model Controls (Section 4.7): Faceted results filtering (type, score, sort), pagination controls, similar document search action, Case 3 graceful refusal warning, and dual embedding model selector.
 
 ### Stage 3 — TODO (more than 1 day)
 
